@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>SimpleCameraJS</title>
+    <style>
+      /* 简单设置一下按钮风格 */
+      button {
+        width: 120px;
+        height: 45px;
+        font-size: 15px;
+        border-radius: 2em;
+        transition: all 0.1s linear;
+        box-shadow: 2px 2px 4px #c5c5c5, -2px -2px 4px #f3f3f3;
+        border: 1px solid #e0e0e0;
+      }
+
+      button:not(:disabled):hover {
+        box-shadow: 6px 6px 12px #c5c5c5, -6px -6px 12px #f3f3f3;
+      }
+
+      button:not(:disabled):active {
+        transform: scale(0.95);
+        box-shadow: none;
+      }
+
+      /* 以下css为摄像头显示视频界面周围的边框，仿造摄像机，更加美观，同时在四角显示分辨率，帧数和录像时间等信息 */
+      /* 参考代码 https://blog.cubieserver.de/2020/how-to-create-a-video-camera-like-overlay-with-html-css/  */
+      .overlay {
+        --border-style: 2px solid white;
+        --border-space: 20px;
+        position: absolute;
+        width: 1280px;
+        height: 720px;
+      }
+
+      .overlay-helper {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+      }
+
+      .overlay-element {
+        padding: 20px;
+        width: 150px;
+        height: 100px;
+        position: absolute;
+      }
+
+      .overlay-text {
+        font-size: 18px;
+        color: white;
+
+        text-shadow: 1px 1px 0 rgb(58, 58, 58), -1px 1px 0 rgb(58, 58, 58),
+          1px -1px 0 rgb(58, 58, 58), -1px -1px 0 rgb(58, 58, 58);
+      }
+
+      .overlay .top-left {
+        border-left: var(--border-style);
+        border-top: var(--border-style);
+        top: var(--border-space);
+        left: var(--border-space);
+        text-align: left;
+      }
+
+      .overlay .top-right {
+        border-right: var(--border-style);
+        border-top: var(--border-style);
+        top: var(--border-space);
+        right: var(--border-space);
+        text-align: right;
+      }
+
+      .overlay .bottom-left {
+        border-left: var(--border-style);
+        border-bottom: var(--border-style);
+        bottom: var(--border-space);
+        left: var(--border-space);
+        text-align: left;
+      }
+
+      .overlay .bottom-right {
+        border-right: var(--border-style);
+        border-bottom: var(--border-style);
+        bottom: var(--border-space);
+        right: var(--border-space);
+        text-align: right;
+      }
+
+      #overlay-bottom-left-text {
+        position: absolute;
+        bottom: var(--border-space);
+        left: var(--border-space);
+      }
+
+      #overlay-bottom-right-text {
+        position: absolute;
+        bottom: var(--border-space);
+        right: var(--border-space);
+      }
+
+      .blink {
+        animation: blink 0.5s linear infinite alternate;
+      }
+
+      .fade {
+        animation: fade 2s;
+        animation-timing-function: ease-in-out;
+        animation-fill-mode: forwards;
+      }
+
+      @keyframes fade {
+        to {
+          opacity: 0;
+        }
+      }
+
+      @keyframes blink {
+        0% {
+          opacity: 1;
+        }
+
+        100% {
+          opacity: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div style="display: flex; width: 600px; justify-content: space-around">
+      <button id="open" onclick="open_camera()">开启摄像头</button>
+      <button id="record" onclick="record_act()" disabled="true">
+        开始录像
+      </button>
+      <!-- <button id="stop" onclick="record_stop()">停止录像</button> -->
+      <button id="photo" onclick="take_photo()" disabled="true">截图</button>
+      <!-- <button id="close" onclick="close_camera()">关闭摄像头</button> -->
+    </div>
+    <br />
+    <div id="content">
+      <div class="overlay">
+        <div class="overlay-helper">
+          <div class="overlay-element top-left">
+            <span
+              id="overlay-top-left-text"
+              class="overlay-text blink"
+              style="display: none"
+            >
+              🔴 REC
+            </span>
+          </div>
+          <div class="overlay-element top-right">
+            <span
+              id="overlay-top-right-text"
+              class="overlay-text"
+              style="display: none"
+            >
+              00:00
+            </span>
+          </div>
+          <div class="overlay-element bottom-left">
+            <span
+              id="overlay-bottom-left-text"
+              class="overlay-text"
+              style="display: none"
+            >
+              1 FPS
+            </span>
+          </div>
+          <div class="overlay-element bottom-right">
+            <span
+              id="overlay-bottom-right-text"
+              class="overlay-text"
+              style="display: none"
+            >
+              1x1
+            </span>
+          </div>
+        </div>
+        <!-- 这里可以放一个logo 然后实现渐隐效果 -->
+        <div
+          style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+          "
+          id="div_logo"
+        >
+          <img src="logo.png" height="140px" draggable="false" alt="LOGO" />
+        </div>
+      </div>
+    </div>
+
+    <video
+      id="video"
+      width="1280"
+      height="720"
+      autoplay
+      style="border: 2px solid #c5c5c5"
+    ></video>
+
+    <!-- <script src="js/jquery-3.7.0.min.js"></script> -->
+    <script src="RecordRTC.js"></script>
+    <script>
+      "use strict";
+      var scale = 1;
+      var recorder;
+      var video = document.getElementById("video");
+      var video_width = 1280;
+      var video_height = 720;
+      var video_fps = 60;
+      //var img = document.getElementById("img");
+
+      var timer = null;
+      var start_time;
+      var now_time;
+
+      //默认编码
+      let mimeType = "video/webm\;codecs=h264"; // H264
+      let recorderType = MediaStreamRecorder;
+      //加入对支持的编码格式进行测试的代码
+      isMimeTypeSupported("video/webm\;codecs=h264"); //H264
+      isMimeTypeSupported("video/x-matroska;codecs=avc1"); //MKV
+      isMimeTypeSupported("video/webm\;codecs=vp9"); //VP9
+      isMimeTypeSupported("video/webm\;codecs=vp8"); //VP8
+      isMimeTypeSupported("video/mpeg"); // video/mp4;codecs=avc1
+      isMimeTypeSupported("video/mp4;codecs=avc1"); // video/mp4;codecs=avc1
+      isMimeTypeSupported("video/webm"); // do NOT pass any codecs (vp8 by default)
+      //isMimeTypeSupported("video/webm\;codecs=vp10"); // JUST TEST
+
+      //自行切换编码格式
+      if (isMimeTypeSupported(mimeType) === false) {
+        mimeType = "video/x-matroska;codecs=avc1"; // MKV
+
+        if (isMimeTypeSupported(mimeType) === false) {
+          mimeType = "video/webm\;codecs=vp9"; // VP9
+
+          if (isMimeTypeSupported(mimeType) === false) {
+            mimeType = "video/webm\;codecs=vp8"; // VP8
+
+            if (isMimeTypeSupported(mimeType) === false) {
+              mimeType = "video/webm"; // 不使用任何编码器 (默认vp8)
+
+              if (isMimeTypeSupported(mimeType) === false) {
+                //切换到Whammy编码器 (WebP+WebM)
+                mimeType = "video/webm";
+                recorderType = WhammyRecorder;
+              }
+            }
+          }
+        }
+      }
+
+      function isMimeTypeSupported(mimeType) {
+        if (typeof MediaRecorder === "undefined") {
+          console.log(mimeType, "is *** NOT *** supported.");
+          return false;
+        }
+
+        if (typeof MediaRecorder.isTypeSupported !== "function") {
+          console.log(mimeType, "is supported.");
+          return true;
+        }
+        var ret = MediaRecorder.isTypeSupported(mimeType);
+        if (ret === false) {
+          console.log(mimeType, "is *** NOT *** supported.");
+        } else {
+          console.log(mimeType, "is supported.");
+        }
+        return ret;
+      }
+
+      //开启摄像头之后显示底部信息
+      function show_bottom() {
+        document.getElementById("overlay-bottom-left-text").style.display = "";
+        document.getElementById("overlay-bottom-right-text").style.display = "";
+        document.getElementById("div_logo").classList.add("fade");
+        document.getElementById(
+          "overlay-bottom-right-text"
+        ).innerText = `${video_width} x ${video_height}`;
+
+        document.getElementById(
+          "overlay-bottom-left-text"
+        ).innerText = `${video_fps} FPS`;
+      }
+
+      //开始为录像时间计时
+      function start_count() {
+        document.getElementById("overlay-top-left-text").style.display = "";
+        document.getElementById("overlay-top-right-text").style.display = "";
+        document
+          .querySelector(".overlay")
+          .style.setProperty("--border-style", "2px solid red");
+
+        //计时器并不准确，所以使用内置时钟的当前时间减去之前时间的差值来表示录像时间
+        let dt = new Date();
+        start_time = dt.getTime();
+        timer = setInterval(function () {
+          let d = new Date();
+          let now_time = d.getTime();
+          let diff_time = now_time - start_time;
+          let mini_sec = Math.floor((diff_time % 1000) / 10)
+            .toString()
+            .padStart(2, "0"); //秒数后面两位
+          let sec = Math.floor((diff_time % 60000) / 1000)
+            .toString()
+            .padStart(2, "0"); //秒数
+          let minute = Math.floor((diff_time % 360000) / 60000)
+            .toString()
+            .padStart(2, "0"); //分钟数
+          document.getElementById(
+            "overlay-top-right-text"
+          ).innerText = `${minute}:${sec}:${mini_sec}`;
+        }, 10);
+      }
+
+      //停止计时
+      function stop_count() {
+        document.getElementById("overlay-top-left-text").style.display = "none";
+        document.getElementById("overlay-top-right-text").style.display =
+          "none";
+        document
+          .querySelector(".overlay")
+          .style.setProperty("--border-style", "2px solid white");
+        clearInterval(timer);
+      }
+
+      async function open_camera() {
+        //录像功能使用RecordRTC https://github.com/muaz-khan/RecordRTC
+        //官网    https://recordrtc.org/
+        //RecordRTC是WebRTC-Experiment的一部分   https://github.com/muaz-khan/WebRTC-Experiment/tree/master
+
+        //获取分辨率部分代码参考   https://usefulangle.com/post/355/javascript-get-camera-resolution
+        //没有直接的方法获取相机支持的最大分辨率。所以只能指定一个最大的理想值，如果可用则设为理想值
+        //如果理想值不可用，则浏览器将使用最接近理想值的值。
+
+        //WebRTC获取相机分辨率的一个实例代码   https://webrtc.github.io/samples/src/content/getusermedia/resolution/   *****值得参考!!!****
+        navigator.mediaDevices
+          .getUserMedia({
+            audio: true,
+            video: {
+              width: { ideal: 3840 },
+              height: { ideal: 2160 },
+              frameRate: { ideal: 60 },
+            },
+          })
+          .then(async function (stream) {
+            let settings = stream.getVideoTracks()[0].getSettings();
+
+            video_width = settings.width;
+            video_height = settings.height;
+            video_fps = settings.frameRate;
+
+            //console.log("视频实际宽度: " + width + "px");
+            //console.log("视频实际高度: " + height + "px");
+            //console.log("视频实际FPS: " + video_fps);
+
+            //设置video 宽度 高度 和 视频流
+            video.width = video_width;
+            video.height = video_height;
+            video.srcObject = stream;
+            recorder = RecordRTC(stream, {
+              type: "video",
+              mimeType: "video/mp4",
+              recorderType: recorderType,
+            });
+
+            show_bottom();
+            //禁用open按钮，启用录像和截图按钮
+            document.getElementById("record").disabled = false;
+            document.getElementById("photo").disabled = false;
+            document.getElementById("open").disabled = true;
+          })
+          .catch(function (e) {
+            console.log(e);
+            alert("分辨率无效，请重新选择并开启摄像头");
+          });
+      }
+
+      function close_camera() {
+        video.srcObject = null;
+      }
+
+      function record_act() {
+        console.log(recorder.state);
+        if (recorder.state == "inactive" || recorder.state == "stopped") {
+          document.getElementById("record").innerHTML = "停止录像";
+          record_start();
+        } else if (recorder.state == "recording") {
+          record_stop();
+          document.getElementById("record").innerHTML = "开始录像";
+        }
+      }
+
+      function record_start() {
+        recorder.startRecording();
+        start_count();
+      }
+
+      //停止录像按钮事件
+      function record_stop() {
+        recorder.stopRecording(function () {
+          let blob = recorder.getBlob();
+          stop_count();
+          //保存mp4，有个问题，现在保存的mp4只能在浏览器里打开，有空再研究
+          invokeSaveAsDialog(blob, "video.mp4");
+        });
+      }
+
+      function take_photo() {
+        var canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        canvas
+          .getContext("2d")
+          .drawImage(video, 0, 0, canvas.width, canvas.height);
+        //将图片保存到本地
+        downloadBase64File(canvas.toDataURL("image/jpeg"), "img.jpg");
+      }
+
+      //下载图片到本地
+      function downloadBase64File(contentBase64, fileName) {
+        const linkSource = contentBase64;
+        const downloadLink = document.createElement("a");
+        document.body.appendChild(downloadLink);
+
+        downloadLink.href = linkSource;
+        downloadLink.target = "_self";
+        downloadLink.download = fileName;
+        downloadLink.click();
+        downloadLink.remove();
+      }
+    </script>
+  </body>
+</html>
